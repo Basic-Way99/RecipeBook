@@ -1,0 +1,44 @@
+[
+    {
+        "name": "חזה עוף",
+        "image": "🥘",
+        "category": "ערב",
+        "ingredients": [
+            "20.0 גרם חזה עוף (חי)"
+        ],
+        "calories": 79,
+        "protein": 0,
+        "carbs": 6,
+        "fats": 6,
+        "instructions": ""
+    },
+    {
+        "name": "ניסיון",
+        "image": "🌯",
+        "category": "בוקר",
+        "ingredients": [
+            "100.0 גרם חזה עוף (חי)",
+            "100.0 גרם אורז בסמטי (לפני בישול)",
+            "50.0 גרם טונה במים (מסונן)",
+            "40.0 מ''ל חלב 3%"
+        ],
+        "calories": 482,
+        "protein": 23,
+        "carbs": 30,
+        "fats": 30,
+        "instructions": "שלב 1\nשלב 2 \nשלב 3שלב 1\nשלב 2 \nשלב 3שלב 1\nשלב 2 \nשלב 3שלב 1\nשלב 2 \nשלב 3שלב 1\nשלב 2 \nשלב 3שלב 1\nשלב 2 \nשלב 3\n"
+    },
+    {
+        "name": "כף חזה ",
+        "image": "🥘",
+        "category": "בוקר",
+        "ingredients": [
+            "1 כף חזה עוף (חי)"
+        ],
+        "calories": 59,
+        "protein": 0,
+        "carbs": 4,
+        "fats": 4,
+        "instructions": ""
+    }
+]
