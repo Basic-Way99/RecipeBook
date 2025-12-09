@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 import json
 import os
-import io # נוסף: לטיפול בזרמי נתונים בזיכרון
-import zipfile # נוסף: ליצירת קובץ ZIP
+import io
+import zipfile
 
 try:
     from recipe_scrapers import scrape_me
@@ -164,25 +164,20 @@ def set_selected_emoji(new_emoji):
     st.session_state['selected_emoji'] = new_emoji
     st.rerun() 
 
-# פונקציית הגיבוי החדשה
 def create_backup_zip():
     """דוחס את כל קבצי ה-JSON ל-ZIP ושומר ב-BytesIO."""
     file_list = [RECIPES_FILE, INGREDIENTS_FILE, CATEGORIES_FILE, TRASH_FILE]
     
-    # בודק אם כל הקבצים קיימים, אם לא - יוצר אותם
-    load_json(RECIPES_FILE, st.session_state['recipes'])
-    load_json(INGREDIENTS_FILE, st.session_state['ingredients_db'])
-    load_json(CATEGORIES_FILE, st.session_state['categories'])
-    load_json(TRASH_FILE, st.session_state['trash'])
-    
-    # משתמש ב-io.BytesIO כדי ליצור את קובץ ה-ZIP בזיכרון
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for filename in file_list:
             if os.path.exists(filename):
-                zipf.write(filename)
-    
-    # מחזיר את תוכנו של ה-buffer (ה-ZIP)
+                try:
+                    with open(filename, 'rb') as f:
+                        zipf.writestr(filename, f.read())
+                except Exception:
+                    pass
+
     buffer.seek(0)
     return buffer.getvalue()
 
@@ -246,8 +241,7 @@ st.markdown("""
         transition: background-color 0.1s;
     }
     
-    /* *** תיקון קריטי לריווח האנכי בטאב 2 *** */
-    /* מפחית ריווח מתחת לשדה הטקסט ומעל הטופס */
+    /* *** תיקון קריטי לריווח האנכי בטאב 2 (נשאר לצורך יציבות) *** */
     div[data-testid="stTextInput"] {
         margin-bottom: 0px !important;
     }
@@ -459,10 +453,16 @@ with tab1:
                                     st.text(f"• {ing}")
                             with col_cont2:
                                 st.markdown("**👨‍🍳 הוראות הכנה:**")
+                                # שינוי: הוראות כרשימת צ'קבוקסים
                                 if row['instructions']:
                                     lines = row['instructions'].split('\n')
-                                    for i, line in enumerate(lines, 1):
-                                        if line.strip(): st.write(f"{i}. {line}")
+                                    st.markdown("<style>.stCheckbox label {direction: rtl; text-align: right;}</style>", unsafe_allow_html=True)
+                                    for i, line in enumerate(lines):
+                                        step = line.strip()
+                                        if step:
+                                            # מפתח ייחודי לכל צ'קבוקס עבור המתכון הספציפי
+                                            key = f"recipe_{original_idx}_step_{i}"
+                                            st.checkbox(step, key=key)
                                 else:
                                     st.write("-")
 
@@ -501,7 +501,7 @@ with tab1:
                         c4.metric("🥑 שומן", f"{total_fat} גר'")
 
                         st.write("ללא קטגוריה")
-                        st.write(row['instructions'])
+                        st.write(row['instructions']) # כאן נשאר טקסט רגיל כיוון שאין הוראות של ממש
                         if st.button("🗑️ מחק", key=f"del_other_{original_idx}"):
                             recipe_to_trash = st.session_state['recipes'].pop(original_idx)
                             st.session_state['trash'].append(recipe_to_trash)
@@ -516,11 +516,7 @@ with tab1:
 # ------------------------------------------
 with tab2:
     
-    # === ניהול אייקון נבחר ===
-    default_emoji_for_new_recipe = "🥘"
-    if 'selected_emoji' not in st.session_state:
-        st.session_state['selected_emoji'] = default_emoji_for_new_recipe
-
+    # === טאב 2: פקדי ייבוא ו Mode ===
     with st.expander("🌐 ייבוא מתכון מקישור (YouTube / אתרים)", expanded=False):
         import_url = st.text_input("הדבק כאן קישור למתכון:")
         import_text = st.text_area("או הדבק כאן טקסט חופשי (תיאור מיוטיוב/פייסבוק):")
@@ -552,15 +548,17 @@ with tab2:
                 }
                 st.success("הטקסט נקלט!")
 
+    st.divider()
+
     mode = st.radio("בחר פעולה:", ["➕ מתכון חדש", "✏️ ערוך קיים"], horizontal=True)
 
     default_name = ""
-    default_emoji = "🥘" 
+    default_emoji = "🥘"
     default_cat = st.session_state['categories'][0] if st.session_state['categories'] else ""
     default_inst = ""
     default_ing_df = pd.DataFrame([{"כמות": 1, "יחידה": "גרם", "שם המצרך": ""}])
     edit_index = -1
-    
+
     if imported_data:
         default_name = imported_data.get("name", "")
         default_inst = imported_data.get("instructions", "")
@@ -580,7 +578,6 @@ with tab2:
                     edit_index = i
                     default_name = r['name']
                     default_emoji = r['image']
-                    st.session_state['selected_emoji'] = r['image'] 
                     default_cat = r['category']
                     default_inst = r['instructions']
                     temp_df = parse_ingredients_list(r['ingredients'])
@@ -589,63 +586,30 @@ with tab2:
         else:
             st.warning("אין מתכונים לעריכה.")
 
-    # ===================================================
-    # === פקדי קלט מחוץ לטופס (שם ואייקון) ===
-    # ===================================================
-    # הערה: זה חייב להיות מחוץ לטופס כדי למנוע את שגיאת ה-FormCallback
-    c1, c2 = st.columns([4, 1])
-    
-    with c1:
-        # שם המתכון מחוץ לטופס
-        recipe_name_input = st.text_input("שם המתכון", value=default_name, key='recipe_name_key')
-    
-    with c2:
-        # Popover: מכיל את רשת הבחירה
-        popover_button_text = f"🖼️ {st.session_state.get('selected_emoji', default_emoji)}"
-        with st.popover(popover_button_text):
-            st.markdown("### בחר אייקון למתכון:")
-            
-            # הצגת הרשת
-            cols_per_row = 8
-            emoji_rows = [FOOD_EMOJIS[i:i + cols_per_row] for i in range(0, len(FOOD_EMOJIS), cols_per_row)]
-            
-            for row_emojis in emoji_rows:
-                cols = st.columns(cols_per_row)
-                for i, emoji in enumerate(row_emojis):
-                    with cols[i]:
-                        # הכפתור עצמו (משתמש ב-st.button עם callback)
-                        st.button(
-                            emoji, 
-                            key=f"popover_emoji_{emoji}", 
-                            on_click=set_selected_emoji, 
-                            args=(emoji,),
-                            use_container_width=True
-                        )
-    
-    # ===================================================
-    # === טופס (Form) - מכיל רק קטגוריה ושאר הפקדים ===
-    # ===================================================
-    with st.form("recipe_form"):
-        # קטגוריה (נשארת בתוך הטופס)
-        cat_idx = 0
-        current_cat = default_cat
-        if default_cat in st.session_state['categories']:
-             cat_idx = st.session_state['categories'].index(default_cat)
-        
-        category = st.selectbox("קטגוריה", st.session_state['categories'], index=cat_idx, key='category_selectbox_key')
 
-        # *** אין מפריד כאן ***
-        
+    with st.form("recipe_form"):
+        c1, c2 = st.columns([4, 1])
+        with c1:
+            name = st.text_input("שם המתכון", value=default_name)
+        with c2:
+            e_idx = FOOD_EMOJIS.index(default_emoji) if default_emoji in FOOD_EMOJIS else 0
+            emoji = st.selectbox("אייקון", FOOD_EMOJIS, index=e_idx)
+
+        cat_idx = 0
+        if default_cat in st.session_state['categories']:
+            cat_idx = st.session_state['categories'].index(default_cat)
+        category = st.selectbox("קטגוריה", st.session_state['categories'], index=cat_idx)
+
+        st.divider()
         st.subheader("🛒 הרכבת המנה")
 
-        # סדר עמודות: כמות, יחידה, שם (שם יופיע בימין)
+        # === התיקון הסופי לטבלה ===
         col_order_add = ["כמות", "יחידה", "שם המצרך"]
 
         edited_df = st.data_editor(
             default_ing_df,
             num_rows="dynamic",
             use_container_width=True,
-            key='ing_data_editor', # מפתח לטופס
             column_config={
                 "שם המצרך": st.column_config.SelectboxColumn("שם המצרך",
                                                              options=list(st.session_state['ingredients_db'].keys()),
@@ -660,10 +624,6 @@ with tab2:
         instructions = st.text_area("כתוב כאן...", value=default_inst, height=150)
 
         if st.form_submit_button("💾 שמור מתכון"):
-            # איסוף הנתונים
-            name = st.session_state.get('recipe_name_key', default_name)
-            selected_category = st.session_state.get('category_selectbox_key', default_cat)
-
             if name and not edited_df.empty:
                 nutri = calculate_nutrition(edited_df, st.session_state['ingredients_db'])
                 final_ing_list = []
@@ -674,8 +634,8 @@ with tab2:
 
                 new_recipe_obj = {
                     "name": name,
-                    "image": st.session_state['selected_emoji'], # שימוש באייקון שנבחר מה-popover
-                    "category": selected_category,
+                    "image": emoji,
+                    "category": category,
                     "ingredients": final_ing_list,
                     "calories": nutri["cal"],
                     "protein": nutri["pro"],
@@ -702,6 +662,43 @@ with tab2:
 # ------------------------------------------
 with tab3:
     st.header("⚙️ הגדרות מערכת")
+    
+    # ===================================================
+    # === פקדי בחירת אייקון מחוץ לטופס (PopOver) ===
+    # ===================================================
+    st.subheader("🖼️ אייקון ברירת מחדל לרישום חדש")
+    
+    current_default_emoji = "🥘"
+    if 'selected_emoji' not in st.session_state:
+        st.session_state['selected_emoji'] = current_default_emoji
+    
+    c1, c2 = st.columns([1, 4])
+    with c1:
+        # Popover: מכיל את רשת הבחירה
+        popover_button_text = f"🖼️ {st.session_state.get('selected_emoji', current_default_emoji)}"
+        with st.popover(popover_button_text):
+            st.markdown("### בחר אייקון למתכון (ישמר לשימוש חוזר):")
+            
+            # הצגת הרשת
+            cols_per_row = 8
+            emoji_rows = [FOOD_EMOJIS[i:i + cols_per_row] for i in range(0, len(FOOD_EMOJIS), cols_per_row)]
+            
+            for row_emojis in emoji_rows:
+                cols = st.columns(cols_per_row)
+                for i, emoji in enumerate(row_emojis):
+                    with cols[i]:
+                        # הכפתור עצמו (משתמש ב-st.button עם callback)
+                        st.button(
+                            emoji, 
+                            key=f"tab3_popover_emoji_{emoji}", 
+                            on_click=set_selected_emoji, 
+                            args=(emoji,),
+                            use_container_width=True
+                        )
+    with c2:
+        st.markdown(f"**האייקון הנבחר כרגע:** {st.session_state.get('selected_emoji', current_default_emoji)}")
+    
+    st.divider()
 
     st.subheader("🥦 מצרכים")
     st.info("הזן חלבון/פחמימה/שומן. הקלוריות יחושבו לבד בשמירה.")
@@ -777,12 +774,10 @@ with tab3:
         save_json(CATEGORIES_FILE, new_cat_list)
         st.success("עודכן!")
         st.rerun()
-
-# ------------------------------------------
-# TAB 4: פח אשפה
-# ------------------------------------------
-with tab4:
-    st.header("🗑️ פח אשפה")
+    
+    st.divider()
+    
+    st.subheader("📦 גיבוי ושחזור")
     
     # כפתור הורדת הגיבוי
     backup_data = create_backup_zip()
@@ -793,7 +788,12 @@ with tab4:
         mime="application/zip",
         help="מוריד את כל קבצי ה-JSON (מתכונים, מצרכים, קטגוריות ופח אשפה)"
     )
-    st.divider()
+
+# ------------------------------------------
+# TAB 4: פח אשפה
+# ------------------------------------------
+with tab4:
+    st.header("🗑️ פח אשפה")
     
     if st.session_state['trash']:
         st.write(f"יש {len(st.session_state['trash'])} מתכונים בפח.")
