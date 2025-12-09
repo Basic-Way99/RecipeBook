@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import json
 import os
+import io # נוסף: לטיפול בזרמי נתונים בזיכרון
+import zipfile # נוסף: ליצירת קובץ ZIP
 
 try:
     from recipe_scrapers import scrape_me
@@ -146,18 +148,43 @@ def recalc_all_recipes(recipes_list, ingredients_db):
         count += 1
     return count
 
-
 # פונקציות Callback לטיפול בכפתורי + / - (תיקון שגיאת StreamlitAPIException)
 def increment_serving(serving_key):
     # מעלה את הערך ב-session_state, תוך שמירה על גבול עליון של 100
     if serving_key in st.session_state:
         st.session_state[serving_key] = min(100, st.session_state[serving_key] + 1)
 
-
 def decrement_serving(serving_key):
     # מוריד את הערך ב-session_state, תוך שמירה על גבול תחתון של 1
     if serving_key in st.session_state:
         st.session_state[serving_key] = max(1, st.session_state[serving_key] - 1)
+
+def set_selected_emoji(new_emoji):
+    # פונקציית הקאלבק לעדכון האייקון
+    st.session_state['selected_emoji'] = new_emoji
+    st.rerun() 
+
+# פונקציית הגיבוי החדשה
+def create_backup_zip():
+    """דוחס את כל קבצי ה-JSON ל-ZIP ושומר ב-BytesIO."""
+    file_list = [RECIPES_FILE, INGREDIENTS_FILE, CATEGORIES_FILE, TRASH_FILE]
+    
+    # בודק אם כל הקבצים קיימים, אם לא - יוצר אותם
+    load_json(RECIPES_FILE, st.session_state['recipes'])
+    load_json(INGREDIENTS_FILE, st.session_state['ingredients_db'])
+    load_json(CATEGORIES_FILE, st.session_state['categories'])
+    load_json(TRASH_FILE, st.session_state['trash'])
+    
+    # משתמש ב-io.BytesIO כדי ליצור את קובץ ה-ZIP בזיכרון
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for filename in file_list:
+            if os.path.exists(filename):
+                zipf.write(filename)
+    
+    # מחזיר את תוכנו של ה-buffer (ה-ZIP)
+    buffer.seek(0)
+    return buffer.getvalue()
 
 
 # ==========================================
@@ -191,7 +218,6 @@ st.markdown("""
     }
 
     /* התאמת כפתורי ה +/- */
-    /* שינוי CSS כדי שהכפתורים יופיעו כראוי בתוך העמודות */
     div[data-testid^="stButton"] > button {
         height: 38px;
         line-height: 1; 
@@ -199,15 +225,39 @@ st.markdown("""
         font-weight: bold;
         padding: 5px 12px;
     }
-
+    
     /* מוחק את כפתורי הברירת מחדל של st.number_input */
     div[data-testid="stNumberInput"] button {
         display: none !important;
     }
     div[data-testid="stNumberInput"] > div:nth-child(2) {
-        /* מוודא שהערך המספרי אינו צמוד מידי לקצה הפקד */
         padding-right: 0.5rem; 
     }
+    
+    /* סגנון כפתורי האמוג'י ב-PopOver */
+    .stPopover div[data-testid^="stButton"] > button {
+        height: 40px !important;
+        width: 40px !important;
+        font-size: 1.5rem !important;
+        padding: 0 !important;
+        margin: 1px !important;
+        background-color: #f0f2f6; 
+        border-radius: 8px;
+        transition: background-color 0.1s;
+    }
+    
+    /* *** תיקון קריטי לריווח האנכי בטאב 2 *** */
+    /* מפחית ריווח מתחת לשדה הטקסט ומעל הטופס */
+    div[data-testid="stTextInput"] {
+        margin-bottom: 0px !important;
+    }
+    div[data-testid="stForm"] > div:first-child {
+        padding-top: 0px !important;
+    }
+    div[data-testid="stRadio"] {
+        margin-bottom: 0.5rem !important;
+    }
+
 
     /* מימין לשמאל בטבלאות */
     th {text-align: right !important;}
@@ -308,8 +358,8 @@ with tab1:
                         total_pro = int(row.get('protein', 0))
                         total_carb = int(row.get('carbs', 0))
                         total_fat = int(row.get('fats', 0))
-
-                        # === המתכון הראשי - החזרת כותרת מלאה (מה שהיה לפני הדינמיות) ===
+                        
+                        # === המתכון הראשי - כותרת מלאה ===
                         header_text = (
                             f"{row['image']} **{row['name']}** | "
                             f"🔥 {total_cals} קל' | "
@@ -317,12 +367,11 @@ with tab1:
                             f"🍞 {total_carb} פח' | "
                             f"🥑 {total_fat} שומ'"
                         )
-
+                        
                         # פתיחת ה-Expander
-                        with st.expander(header_text):
+                        with st.expander(header_text): 
 
                             # 1. הצגת הערכים הכוללים (תמיד גלויים כאשר המתכון פתוח)
-                            # **הערכים מופיעים שוב, כצפוי, כיוון שאין תמיכה בכותרת דינמית**
                             st.markdown("##### **ערכים כוללים (לכל המתכון):**")
                             c1, c2, c3, c4 = st.columns(4)
                             c1.metric("🔥 קלוריות", total_cals)
@@ -337,27 +386,27 @@ with tab1:
 
                                 # 2. פקד החלוקה למנות
                                 st.markdown("##### **מספר מנות:**")
-
+                                
                                 # מפתח ייחודי לכל מתכון
                                 serving_key = f"serving_calc_{original_idx}"
-
+                                
                                 # וודא שקיים ערך התחלתי ב-session_state
                                 if serving_key not in st.session_state:
                                     st.session_state[serving_key] = 1
 
                                 # פריסה: מינוס, קלט, פלוס
                                 col_minus, col_servings_input, col_plus = st.columns([0.8, 1.5, 0.8])
-
+                                
                                 # כפתור מינוס
                                 with col_minus:
                                     st.button(
-                                        "➖",
-                                        key=f"minus_{original_idx}",
+                                        "➖", 
+                                        key=f"minus_{original_idx}", 
                                         use_container_width=True,
                                         on_click=decrement_serving,
                                         args=(serving_key,)
                                     )
-
+                                
                                 # פקד קלט (כפתורי הברירת מחדל שלו מוסתרים ע"י CSS)
                                 with col_servings_input:
                                     num_servings = st.number_input(
@@ -373,12 +422,13 @@ with tab1:
                                 # כפתור פלוס
                                 with col_plus:
                                     st.button(
-                                        "➕",
-                                        key=f"plus_{original_idx}",
+                                        "➕", 
+                                        key=f"plus_{original_idx}", 
                                         use_container_width=True,
                                         on_click=increment_serving,
                                         args=(serving_key,)
                                     )
+                                    
 
                                 # 3. חישוב הערכים למנה
                                 if num_servings > 0:
@@ -428,7 +478,7 @@ with tab1:
                 st.header("📂 ללא קטגוריה / אחר")
                 for idx, row in other_recipes.iterrows():
                     original_idx = df[df['name'] == row['name']].index[0]
-
+                    
                     total_cals = int(row.get('calories', 0))
                     total_pro = int(row.get('protein', 0))
                     total_carb = int(row.get('carbs', 0))
@@ -442,7 +492,7 @@ with tab1:
                         f"🍞 {total_carb} פח' | "
                         f"🥑 {total_fat} שומ'"
                     )
-
+                    
                     with st.expander(header_text):
                         c1, c2, c3, c4 = st.columns(4)
                         c1.metric("🔥 קלוריות", total_cals)
@@ -465,6 +515,12 @@ with tab1:
 # TAB 2: הוספה ועריכה
 # ------------------------------------------
 with tab2:
+    
+    # === ניהול אייקון נבחר ===
+    default_emoji_for_new_recipe = "🥘"
+    if 'selected_emoji' not in st.session_state:
+        st.session_state['selected_emoji'] = default_emoji_for_new_recipe
+
     with st.expander("🌐 ייבוא מתכון מקישור (YouTube / אתרים)", expanded=False):
         import_url = st.text_input("הדבק כאן קישור למתכון:")
         import_text = st.text_area("או הדבק כאן טקסט חופשי (תיאור מיוטיוב/פייסבוק):")
@@ -496,18 +552,15 @@ with tab2:
                 }
                 st.success("הטקסט נקלט!")
 
-    st.divider()
-
     mode = st.radio("בחר פעולה:", ["➕ מתכון חדש", "✏️ ערוך קיים"], horizontal=True)
 
     default_name = ""
-    default_emoji = "🥘"
+    default_emoji = "🥘" 
     default_cat = st.session_state['categories'][0] if st.session_state['categories'] else ""
     default_inst = ""
-    # סדר לוגי: כמות (שמאל) -> יחידה -> שם (ימין)
     default_ing_df = pd.DataFrame([{"כמות": 1, "יחידה": "גרם", "שם המצרך": ""}])
     edit_index = -1
-
+    
     if imported_data:
         default_name = imported_data.get("name", "")
         default_inst = imported_data.get("instructions", "")
@@ -521,37 +574,70 @@ with tab2:
         if st.session_state['recipes']:
             recipe_names = [r['name'] for r in st.session_state['recipes']]
             selected_recipe_name = st.selectbox("בחר מתכון לעריכה:", recipe_names)
+            
             for i, r in enumerate(st.session_state['recipes']):
                 if r['name'] == selected_recipe_name:
                     edit_index = i
                     default_name = r['name']
                     default_emoji = r['image']
+                    st.session_state['selected_emoji'] = r['image'] 
                     default_cat = r['category']
                     default_inst = r['instructions']
                     temp_df = parse_ingredients_list(r['ingredients'])
                     if not temp_df.empty:
-                        # וידוא סדר הפוך (עבור LTR)
-                        default_ing_df = temp_df[["כמות", "יחידה", "שם המצרך"]]
+                        default_ing_df = pd.DataFrame(temp_df[["כמות", "יחידה", "שם המצרך"]])
         else:
             st.warning("אין מתכונים לעריכה.")
 
+    # ===================================================
+    # === פקדי קלט מחוץ לטופס (שם ואייקון) ===
+    # ===================================================
+    # הערה: זה חייב להיות מחוץ לטופס כדי למנוע את שגיאת ה-FormCallback
+    c1, c2 = st.columns([4, 1])
+    
+    with c1:
+        # שם המתכון מחוץ לטופס
+        recipe_name_input = st.text_input("שם המתכון", value=default_name, key='recipe_name_key')
+    
+    with c2:
+        # Popover: מכיל את רשת הבחירה
+        popover_button_text = f"🖼️ {st.session_state.get('selected_emoji', default_emoji)}"
+        with st.popover(popover_button_text):
+            st.markdown("### בחר אייקון למתכון:")
+            
+            # הצגת הרשת
+            cols_per_row = 8
+            emoji_rows = [FOOD_EMOJIS[i:i + cols_per_row] for i in range(0, len(FOOD_EMOJIS), cols_per_row)]
+            
+            for row_emojis in emoji_rows:
+                cols = st.columns(cols_per_row)
+                for i, emoji in enumerate(row_emojis):
+                    with cols[i]:
+                        # הכפתור עצמו (משתמש ב-st.button עם callback)
+                        st.button(
+                            emoji, 
+                            key=f"popover_emoji_{emoji}", 
+                            on_click=set_selected_emoji, 
+                            args=(emoji,),
+                            use_container_width=True
+                        )
+    
+    # ===================================================
+    # === טופס (Form) - מכיל רק קטגוריה ושאר הפקדים ===
+    # ===================================================
     with st.form("recipe_form"):
-        c1, c2 = st.columns([4, 1])
-        with c1:
-            name = st.text_input("שם המתכון", value=default_name)
-        with c2:
-            e_idx = FOOD_EMOJIS.index(default_emoji) if default_emoji in FOOD_EMOJIS else 0
-            emoji = st.selectbox("אייקון", FOOD_EMOJIS, index=e_idx)
-
+        # קטגוריה (נשארת בתוך הטופס)
         cat_idx = 0
+        current_cat = default_cat
         if default_cat in st.session_state['categories']:
-            cat_idx = st.session_state['categories'].index(default_cat)
-        category = st.selectbox("קטגוריה", st.session_state['categories'], index=cat_idx)
+             cat_idx = st.session_state['categories'].index(default_cat)
+        
+        category = st.selectbox("קטגוריה", st.session_state['categories'], index=cat_idx, key='category_selectbox_key')
 
-        st.divider()
+        # *** אין מפריד כאן ***
+        
         st.subheader("🛒 הרכבת המנה")
 
-        # === התיקון הסופי לטבלה ===
         # סדר עמודות: כמות, יחידה, שם (שם יופיע בימין)
         col_order_add = ["כמות", "יחידה", "שם המצרך"]
 
@@ -559,6 +645,7 @@ with tab2:
             default_ing_df,
             num_rows="dynamic",
             use_container_width=True,
+            key='ing_data_editor', # מפתח לטופס
             column_config={
                 "שם המצרך": st.column_config.SelectboxColumn("שם המצרך",
                                                              options=list(st.session_state['ingredients_db'].keys()),
@@ -573,6 +660,10 @@ with tab2:
         instructions = st.text_area("כתוב כאן...", value=default_inst, height=150)
 
         if st.form_submit_button("💾 שמור מתכון"):
+            # איסוף הנתונים
+            name = st.session_state.get('recipe_name_key', default_name)
+            selected_category = st.session_state.get('category_selectbox_key', default_cat)
+
             if name and not edited_df.empty:
                 nutri = calculate_nutrition(edited_df, st.session_state['ingredients_db'])
                 final_ing_list = []
@@ -583,8 +674,8 @@ with tab2:
 
                 new_recipe_obj = {
                     "name": name,
-                    "image": emoji,
-                    "category": category,
+                    "image": st.session_state['selected_emoji'], # שימוש באייקון שנבחר מה-popover
+                    "category": selected_category,
                     "ingredients": final_ing_list,
                     "calories": nutri["cal"],
                     "protein": nutri["pro"],
@@ -692,6 +783,18 @@ with tab3:
 # ------------------------------------------
 with tab4:
     st.header("🗑️ פח אשפה")
+    
+    # כפתור הורדת הגיבוי
+    backup_data = create_backup_zip()
+    st.download_button(
+        label="⬇️ הורד גיבוי מאגרים (ZIP)",
+        data=backup_data,
+        file_name="recipe_backup.zip",
+        mime="application/zip",
+        help="מוריד את כל קבצי ה-JSON (מתכונים, מצרכים, קטגוריות ופח אשפה)"
+    )
+    st.divider()
+    
     if st.session_state['trash']:
         st.write(f"יש {len(st.session_state['trash'])} מתכונים בפח.")
         for idx, row in enumerate(st.session_state['trash']):
